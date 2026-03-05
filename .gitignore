@@ -1,0 +1,11 @@
+data/*.db
+data/*.db-wal
+data/*.db-shm
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+.coverage
+.mypy_cache/
+.ruff_cache/

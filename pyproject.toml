@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jellydash"
+version = "0.1.0"
+description = "Platform analytics dashboard for JellyJelly"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Rick Galbo", email = "rick@wayyresearch.com" }]
+dependencies = [
+    "jellyjelly>=0.2.0",
+    "streamlit>=1.40",
+    "pandas>=2",
+    "plotly>=5",
+    "scikit-learn>=1.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-cov>=5,<6",
+    "respx>=0.21,<1",
+    "black>=24,<25",
+    "ruff>=0.5,<1",
+    "mypy>=1.10,<2",
+    "pandas-stubs>=2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jellydash"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["streamlit.*", "plotly.*", "sklearn.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
