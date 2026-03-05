@@ -14,9 +14,7 @@ from jellydash.db.schema import create_tables
 
 T = TypeVar("T")
 
-_DB_PATH = (
-    Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
-)
+_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
 
 
 def run_async(coro: Any) -> Any:

@@ -6,14 +6,33 @@ import asyncio
 import logging
 import threading
 import time
+import traceback
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _sync_thread: threading.Thread | None = None
 _sync_lock = threading.Lock()
+_last_error: str | None = None
 
 SYNC_INTERVAL_SECONDS = 15 * 60  # 15 minutes
+
+
+def _safe_async_run(coro: Any) -> Any:
+    """Run async code safely, creating a new event loop if needed."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # We're in a thread with an existing loop — make a new one
+        new_loop = asyncio.new_event_loop()
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            new_loop.close()
+    return asyncio.run(coro)
 
 
 def _run_sync_loop(
@@ -21,6 +40,8 @@ def _run_sync_loop(
     interval: int = SYNC_INTERVAL_SECONDS,
 ) -> None:
     """Run sync in a loop forever (runs in background thread)."""
+    global _last_error
+
     from jellydash.analytics.games import refresh_all_games
     from jellydash.analytics.rankings import refresh_user_stats
     from jellydash.analytics.topics import refresh_topics
@@ -34,8 +55,9 @@ def _run_sync_loop(
             create_tables(conn)
 
             logger.info("Background sync starting...")
-            result = asyncio.run(run_full_sync(conn, max_pages=10))
+            result = _safe_async_run(run_full_sync(conn, max_pages=10))
             logger.info("Sync done: %s", result)
+            _last_error = None
 
             # Refresh analytics
             refresh_user_stats(conn)
@@ -46,6 +68,7 @@ def _run_sync_loop(
 
             conn.close()
         except Exception:
+            _last_error = traceback.format_exc()
             logger.exception("Background sync error")
 
         time.sleep(interval)
@@ -71,7 +94,7 @@ def ensure_initial_sync(db_path: str) -> dict[str, Any] | None:
         return None
 
     logger.info("DB empty — running initial sync...")
-    result: dict[str, Any] = asyncio.run(run_full_sync(conn, max_pages=10))
+    result: dict[str, Any] = _safe_async_run(run_full_sync(conn, max_pages=10))
 
     refresh_user_stats(conn)
     for period in ["all_time", "30d", "7d", "24h"]:
@@ -107,3 +130,8 @@ def start_background_sync(db_path: str) -> bool:
 def is_sync_running() -> bool:
     """Check if the background sync thread is alive."""
     return _sync_thread is not None and _sync_thread.is_alive()
+
+
+def get_last_error() -> str | None:
+    """Return the last sync error traceback, if any."""
+    return _last_error

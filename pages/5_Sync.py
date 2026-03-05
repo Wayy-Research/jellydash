@@ -11,7 +11,7 @@ from jellydash.analytics.games import refresh_all_games
 from jellydash.analytics.rankings import refresh_user_stats
 from jellydash.analytics.topics import refresh_topics
 from jellydash.db import queries
-from jellydash.sync.background import is_sync_running
+from jellydash.sync.background import get_last_error, is_sync_running
 from jellydash.ui.helpers import get_db, run_async
 
 st.set_page_config(page_title="Sync | JellyDash", page_icon="⚙️", layout="wide")
@@ -19,6 +19,11 @@ st.title("⚙️ Sync & Admin")
 
 sync_status = "🟢 Live" if is_sync_running() else "🔴 Stopped"
 st.caption(f"Background sync: {sync_status} (auto-refreshes every 15 min)")
+
+last_err = get_last_error()
+if last_err:
+    with st.expander("Last sync error", expanded=True):
+        st.code(last_err)
 
 conn = get_db()
 
