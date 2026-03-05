@@ -43,7 +43,7 @@ async def discover_jelly_ids(
     client: JellyClient,
     existing_ids: set[str],
     max_pages_per_query: int = 5,
-    page_size: int = 100,
+    page_size: int = 50,
 ) -> tuple[list[str], list[str]]:
     """Run broad searches to discover jelly IDs not yet in the DB.
 
