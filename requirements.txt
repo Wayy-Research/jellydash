@@ -1,2 +1,5 @@
--e .
-jellyjelly @ git+https://github.com/Wayy-Research/jelly.git
+jellyjelly @ git+https://github.com/Wayy-Research/jelly.git@main
+streamlit>=1.40
+pandas>=2
+plotly>=5
+scikit-learn>=1.5

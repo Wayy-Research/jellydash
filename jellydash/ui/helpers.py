@@ -15,7 +15,7 @@ from jellydash.db.schema import create_tables
 T = TypeVar("T")
 
 _DB_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent / "data" / "jellydash.db"
+    Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
 )
 
 

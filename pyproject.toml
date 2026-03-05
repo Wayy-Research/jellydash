@@ -31,7 +31,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/jellydash"]
+packages = ["jellydash"]
 
 [tool.black]
 line-length = 88

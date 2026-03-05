@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 _DEFAULT_DB_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent / "data" / "jellydash.db"
+    Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
 )
 
 
