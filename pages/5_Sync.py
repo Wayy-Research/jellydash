@@ -27,6 +27,17 @@ if last_err:
 
 conn = get_db()
 
+# Diagnostic
+if st.button("🔍 Run API Diagnostic"):
+    with st.spinner("Testing API connectivity..."):
+        from jellydash.sync.scraper import run_diagnostic
+
+        try:
+            diag = run_async(run_diagnostic())
+            st.json(diag)
+        except Exception as exc:
+            st.error(f"Diagnostic failed: {type(exc).__name__}: {exc}")
+
 # Sync controls
 col1, col2, col3 = st.columns(3)
 
@@ -40,6 +51,13 @@ with col1:
                 f"Sync complete: {result['detailed']} jellies fetched, "
                 f"{result['errors']} errors"
             )
+            if result.get("discovery_errors"):
+                with st.expander(
+                    f"Discovery errors ({len(result['discovery_errors'])})",
+                    expanded=True,
+                ):
+                    for err in result["discovery_errors"]:
+                        st.code(err)
 
 with col2:
     if st.button("⚡ Run Incremental Sync"):
@@ -60,7 +78,8 @@ with col3:
                 refresh_topics(conn, period)
             game_results = refresh_all_games(conn)
             total_scores = (
-                game_results["transcript_scores"] + game_results["aggregate_scores"]
+                game_results["transcript_scores"]
+                + game_results["aggregate_scores"]
             )
             st.success(
                 f"Refreshed: {n_users} users, "

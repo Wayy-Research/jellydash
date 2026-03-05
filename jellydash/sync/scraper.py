@@ -44,9 +44,14 @@ async def discover_jelly_ids(
     existing_ids: set[str],
     max_pages_per_query: int = 5,
     page_size: int = 100,
-) -> list[str]:
-    """Run broad searches to discover jelly IDs not yet in the DB."""
+) -> tuple[list[str], list[str]]:
+    """Run broad searches to discover jelly IDs not yet in the DB.
+
+    Returns:
+        Tuple of (new_ids, discovery_errors).
+    """
     found: set[str] = set()
+    errors: list[str] = []
 
     for query in SEARCH_QUERIES:
         try:
@@ -57,10 +62,57 @@ async def discover_jelly_ids(
                 if j.id not in existing_ids:
                     found.add(j.id)
             logger.info("Query %r: found %d jellies", query, len(jellies))
-        except Exception:
+        except Exception as exc:
+            err_msg = f"Query {query!r}: {type(exc).__name__}: {exc}"
+            errors.append(err_msg)
             logger.exception("Error searching query %r", query)
 
-    return list(found)
+    return list(found), errors
+
+
+async def run_diagnostic(
+    client: JellyClient | None = None,
+) -> dict[str, Any]:
+    """Run a quick diagnostic to test API connectivity.
+
+    Returns a dict with test results for debugging sync issues.
+    """
+    own_client = client is None
+    results: dict[str, Any] = {}
+
+    try:
+        if client is None:
+            client = JellyClient()
+            await client.__aenter__()
+
+        # Test 1: simple search
+        try:
+            resp = await client.search("", page=1, page_size=1)
+            results["search_ok"] = True
+            results["search_count"] = len(resp.jellies)
+            if resp.jellies:
+                results["first_id"] = resp.jellies[0].id
+        except Exception as exc:
+            results["search_ok"] = False
+            results["search_error"] = f"{type(exc).__name__}: {exc}"
+
+        # Test 2: get a specific jelly (if search worked)
+        if results.get("first_id"):
+            try:
+                detail = await client.get_jelly(results["first_id"])
+                results["detail_ok"] = True
+                results["detail_title"] = detail.title[:80] if detail.title else None
+            except Exception as exc:
+                results["detail_ok"] = False
+                results["detail_error"] = f"{type(exc).__name__}: {exc}"
+
+    except Exception as exc:
+        results["client_error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        if own_client and client is not None:
+            await client.close()
+
+    return results
 
 
 async def fetch_details(
@@ -115,7 +167,7 @@ async def run_full_sync(
             await client.__aenter__()
 
         existing = get_existing_ids(conn)
-        new_ids = await discover_jelly_ids(
+        new_ids, discovery_errors = await discover_jelly_ids(
             client, existing, max_pages_per_query=max_pages
         )
         # Also re-fetch stale entries
@@ -123,27 +175,31 @@ async def run_full_sync(
         all_ids = list(set(new_ids) | set(stale_ids))
 
         logger.info(
-            "Sync: %d new, %d stale, %d total to fetch",
+            "Sync: %d new, %d stale, %d total to fetch, "
+            "%d discovery errors",
             len(new_ids),
             len(stale_ids),
             len(all_ids),
+            len(discovery_errors),
         )
 
         detailed, errs = await fetch_details(client, all_ids, conn, concurrency)
+        total_errors = errs + len(discovery_errors)
         finish_sync_run(
             conn,
             run_id,
             status="completed",
             jellies_found=len(new_ids),
             jellies_detailed=detailed,
-            errors=errs,
+            errors=total_errors,
         )
         return {
             "run_id": run_id,
             "new_ids": len(new_ids),
             "stale_ids": len(stale_ids),
             "detailed": detailed,
-            "errors": errs,
+            "errors": total_errors,
+            "discovery_errors": discovery_errors,
         }
     except Exception:
         finish_sync_run(conn, run_id, status="failed", errors=1)
