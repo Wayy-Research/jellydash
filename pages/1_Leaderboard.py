@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from jellydash.analytics.rankings import get_ranked_users
+from jellydash.analytics.rankings import get_ranked_users, get_rising_stars
 from jellydash.db import queries
 from jellydash.ui.helpers import get_db
 
@@ -27,6 +27,8 @@ with col1:
             "total_jellies",
             "avg_views",
             "avg_likes",
+            "views_per_post",
+            "jelly_score",
         ],
         format_func=lambda x: x.replace("_", " ").title(),
     )
@@ -69,3 +71,17 @@ if rows:
             )
 else:
     st.info("No data available. Run a sync first.")
+
+# Rising Stars section
+st.divider()
+st.subheader("Rising Stars")
+st.caption("New creators (last 30 days) with 3+ posts and above-average views/post")
+
+stars = get_rising_stars(conn, limit=20)
+if stars:
+    star_df = pd.DataFrame(stars)
+    display = ["username", "full_name", "total_jellies", "views_per_post", "jelly_score", "first_seen_at"]
+    available = [c for c in display if c in star_df.columns]
+    st.dataframe(star_df[available], use_container_width=True, hide_index=True)
+else:
+    st.info("No rising stars found yet.")

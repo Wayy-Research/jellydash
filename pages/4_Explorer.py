@@ -33,23 +33,29 @@ st.divider()
 
 # User profile view
 st.subheader("User Profile")
-all_stats = queries.get_all_user_stats(conn)
-if all_stats:
-    usernames = [s["username"] for s in all_stats]
+user_search = st.text_input("Search users by name", key="user_search")
+user_results = queries.search_users(conn, user_search) if user_search else []
+
+if user_search and not user_results:
+    st.info("No users found.")
+
+if user_results:
+    usernames = [s["username"] for s in user_results]
     selected = st.selectbox("Select user", usernames)
 
     if selected:
-        user = next((s for s in all_stats if s["username"] == selected), None)
+        user = next((s for s in user_results if s["username"] == selected), None)
         if user:
             pid = user["participant_id"]
 
             # Stats
-            cols = st.columns(5)
+            cols = st.columns(6)
             cols[0].metric("Jellies", user["total_jellies"])
             cols[1].metric("Total Views", f"{user['total_views']:,}")
             cols[2].metric("Total Likes", f"{user['total_likes']:,}")
-            cols[3].metric("Avg Views", f"{user['avg_views']:.0f}")
-            cols[4].metric("Tips", f"${user['total_tips']:.2f}")
+            cols[3].metric("Views/Post", f"{user.get('views_per_post', 0):.0f}")
+            cols[4].metric("JellyScore", f"{user.get('jelly_score', 0):.1f}")
+            cols[5].metric("Tips", f"${user['total_tips']:.2f}")
 
             # Badges
             badges = queries.get_user_badges(conn, pid)
@@ -79,8 +85,8 @@ if all_stats:
                 for j in user_jellies:
                     with st.expander(f"{j['title']} — {j['all_views']:,} views"):
                         jelly_card(j, conn)
-else:
-    st.info("No users found. Run a sync first.")
+elif not user_search:
+    st.caption("Type a username or name above to explore user profiles.")
 
 # Transcript viewer with filler highlighting
 st.divider()

@@ -69,6 +69,9 @@ _TABLES: list[str] = [
         avg_likes       REAL NOT NULL DEFAULT 0.0,
         avg_comments    REAL NOT NULL DEFAULT 0.0,
         avg_duration    REAL NOT NULL DEFAULT 0.0,
+        views_per_post  REAL NOT NULL DEFAULT 0.0,
+        jelly_score     REAL NOT NULL DEFAULT 0.0,
+        is_rising_star  INTEGER NOT NULL DEFAULT 0,
         computed_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
     )
     """,
@@ -135,6 +138,13 @@ _INDEXES: list[str] = [
 ]
 
 
+_MIGRATIONS: list[str] = [
+    "ALTER TABLE user_stats ADD COLUMN views_per_post REAL NOT NULL DEFAULT 0.0",
+    "ALTER TABLE user_stats ADD COLUMN jelly_score REAL NOT NULL DEFAULT 0.0",
+    "ALTER TABLE user_stats ADD COLUMN is_rising_star INTEGER NOT NULL DEFAULT 0",
+]
+
+
 def create_tables(conn: sqlite3.Connection) -> None:
     """Create all tables and indexes if they don't exist."""
     cur = conn.cursor()
@@ -142,4 +152,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
         cur.execute(ddl)
     for idx in _INDEXES:
         cur.execute(idx)
+    # Run migrations for existing DBs (ignore if column already exists)
+    for migration in _MIGRATIONS:
+        try:
+            cur.execute(migration)
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     conn.commit()

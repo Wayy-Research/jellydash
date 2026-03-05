@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jellyjelly.client import JellyClient
@@ -66,6 +67,73 @@ async def discover_jelly_ids(
             err_msg = f"Query {query!r}: {type(exc).__name__}: {exc}"
             errors.append(err_msg)
             logger.exception("Error searching query %r", query)
+
+    return list(found), errors
+
+
+async def discover_by_date_sweep(
+    client: JellyClient,
+    existing_ids: set[str],
+    start: str = "2024-01-01",
+    window_days: int = 7,
+    max_pages_per_window: int = 10,
+    page_size: int = 50,
+) -> tuple[list[str], list[str]]:
+    """Walk backward from today in weekly windows to discover all jellies.
+
+    Args:
+        client: Active JellyClient instance.
+        existing_ids: IDs already in the DB (skip these).
+        start: Earliest date to sweep (YYYY-MM-DD).
+        window_days: Size of each date window in days.
+        max_pages_per_window: Max pages to paginate per window.
+        page_size: Results per page.
+
+    Returns:
+        Tuple of (new_ids, errors).
+    """
+    found: set[str] = set()
+    errors: list[str] = []
+
+    end_dt = datetime.now(UTC).date()
+    start_dt = datetime.strptime(start, "%Y-%m-%d").date()
+    window = timedelta(days=window_days)
+
+    if end_dt <= start_dt:
+        logger.warning(
+            "Date sweep: end %s <= start %s, nothing to sweep", end_dt, start_dt
+        )
+        return list(found), errors
+
+    cursor = end_dt
+    while cursor > start_dt:
+        w_start = max(cursor - window, start_dt)
+        w_end = cursor
+
+        try:
+            jellies: list[Jelly] = await search_all_pages(
+                client,
+                "",
+                max_pages=max_pages_per_window,
+                page_size=page_size,
+                start_date=w_start.isoformat(),
+                end_date=w_end.isoformat(),
+            )
+            new_in_window = 0
+            for j in jellies:
+                if j.id not in existing_ids:
+                    found.add(j.id)
+                    new_in_window += 1
+            logger.info(
+                "Date sweep %s → %s: %d results, %d new",
+                w_start, w_end, len(jellies), new_in_window,
+            )
+        except Exception as exc:
+            err_msg = f"Date sweep {w_start}→{w_end}: {type(exc).__name__}: {exc}"
+            errors.append(err_msg)
+            logger.exception("Error in date sweep window %s→%s", w_start, w_end)
+
+        cursor = w_start
 
     return list(found), errors
 
@@ -152,13 +220,22 @@ async def run_full_sync(
     client: JellyClient | None = None,
     max_pages: int = 5,
     concurrency: int = 3,
+    use_date_sweep: bool = False,
 ) -> dict[str, Any]:
     """Run a full discovery + detail sync.
+
+    Args:
+        conn: Database connection.
+        client: Optional JellyClient (created if None).
+        max_pages: Max pages per keyword query.
+        concurrency: Concurrent detail fetches.
+        use_date_sweep: If True, also walk date windows to discover all jellies.
 
     Returns:
         Dict with sync run stats.
     """
-    run_id = start_sync_run(conn, strategy="full")
+    strategy = "date_sweep" if use_date_sweep else "full"
+    run_id = start_sync_run(conn, strategy=strategy)
     own_client = client is None
 
     try:
@@ -170,6 +247,14 @@ async def run_full_sync(
         new_ids, discovery_errors = await discover_jelly_ids(
             client, existing, max_pages_per_query=max_pages
         )
+
+        # Date sweep for full coverage
+        if use_date_sweep:
+            sweep_ids, sweep_errors = await discover_by_date_sweep(
+                client, existing | set(new_ids)
+            )
+            new_ids = list(set(new_ids) | set(sweep_ids))
+            discovery_errors.extend(sweep_errors)
         # Also re-fetch stale entries
         stale_ids = get_stale_ids(conn, max_age_hours=24)
         all_ids = list(set(new_ids) | set(stale_ids))

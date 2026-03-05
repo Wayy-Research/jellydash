@@ -7,44 +7,36 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 
 STOP_WORDS_EXTRA: list[str] = [
-    "um",
-    "uh",
-    "like",
-    "know",
-    "yeah",
-    "right",
-    "okay",
-    "oh",
-    "gonna",
-    "gotta",
-    "wanna",
-    "kinda",
-    "sorta",
-    "basically",
-    "literally",
-    "actually",
-    "really",
-    "just",
-    "thing",
-    "things",
-    "stuff",
-    "mean",
-    "think",
-    "lot",
-    "got",
-    "get",
-    "going",
-    "come",
-    "said",
-    "say",
-    "saying",
-    "people",
-    "guy",
-    "guys",
+    # Spoken-language fillers
+    "um", "uh", "uh huh", "hmm", "huh", "ah", "eh", "er", "mm",
+    "oh", "wow", "whoa", "ooh", "yep", "yup", "nah", "nope",
+    # Common interjections / discourse markers
+    "like", "know", "yeah", "right", "okay", "ok", "sure", "well",
+    "anyway", "anyways", "basically", "literally", "actually", "really",
+    "honestly", "seriously", "definitely", "obviously", "apparently",
+    "exactly", "absolutely", "probably", "maybe", "perhaps",
+    # Contractions and informal forms
+    "gonna", "gotta", "wanna", "kinda", "sorta", "coulda", "shoulda",
+    "woulda", "ain", "don", "didn", "doesn", "isn", "wasn", "weren",
+    "won", "wouldn", "couldn", "hasn", "haven", "hadn", "shouldn",
+    "ve", "ll", "re", "let",
+    # Common verbs that add noise
+    "just", "got", "get", "getting", "going", "go", "come", "came",
+    "said", "say", "saying", "tell", "told", "think", "thought",
+    "mean", "want", "need", "look", "looking", "see", "saw",
+    "make", "making", "made", "take", "taking", "took",
+    "put", "try", "trying", "tried", "give", "gave", "keep",
+    "feel", "felt", "start", "started", "happen", "happened",
+    # Generic nouns
+    "thing", "things", "stuff", "lot", "lots", "way", "time",
+    "people", "person", "guy", "guys", "man", "woman",
+    "day", "year", "point", "part", "kind",
 ]
+
+STOP_WORDS_ALL: list[str] = sorted(set(ENGLISH_STOP_WORDS) | set(STOP_WORDS_EXTRA))
 
 
 def extract_topics(
@@ -68,7 +60,7 @@ def extract_topics(
     vectorizer = TfidfVectorizer(
         ngram_range=(1, 2),
         max_features=max_features,
-        stop_words="english",
+        stop_words=STOP_WORDS_ALL,
         min_df=2,
         max_df=0.85,
     )
@@ -184,7 +176,7 @@ def refresh_topics(
         vectorizer = TfidfVectorizer(
             ngram_range=(1, 2),
             max_features=5000,
-            stop_words="english",
+            stop_words=STOP_WORDS_ALL,
             min_df=2,
             max_df=0.85,
         )

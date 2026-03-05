@@ -40,7 +40,7 @@ def _search_response(jelly_ids: list[str]) -> dict:  # type: ignore[type-arg]
         "jellies": jellies,
         "total": len(jellies),
         "page": 1,
-        "page_size": 100,
+        "page_size": 50,
     }
 
 
@@ -61,8 +61,8 @@ async def test_discover_jelly_ids(
 
     async with JellyClient() as client:
         existing = get_existing_ids(db)
-        new_ids = await discover_jelly_ids(
-            client, existing, max_pages_per_query=1, page_size=100
+        new_ids, errors = await discover_jelly_ids(
+            client, existing, max_pages_per_query=1, page_size=50
         )
 
     assert "new-1" in new_ids

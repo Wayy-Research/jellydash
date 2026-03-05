@@ -178,16 +178,39 @@ def get_transcript_words(
 
 def search_transcripts(conn: sqlite3.Connection, query: str) -> list[dict[str, Any]]:
     """Search transcripts by full_text LIKE match."""
+    escaped = _escape_like(query)
     rows = conn.execute(
         """
         SELECT t.jelly_id, t.full_text, j.title, j.all_views, j.likes_count
         FROM transcripts t
         JOIN jellies j ON j.id = t.jelly_id
-        WHERE t.full_text LIKE ?
+        WHERE t.full_text LIKE ? ESCAPE '\\'
         ORDER BY j.all_views DESC
         LIMIT 50
         """,
-        (f"%{query}%",),
+        (f"%{escaped}%",),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _escape_like(s: str) -> str:
+    """Escape LIKE pattern metacharacters."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_users(conn: sqlite3.Connection, query: str) -> list[dict[str, Any]]:
+    """Search users by username or full_name LIKE match."""
+    escaped = _escape_like(query)
+    rows = conn.execute(
+        """
+        SELECT us.*, p.username, p.full_name, p.pfp_url
+        FROM user_stats us
+        JOIN participants p ON p.id = us.participant_id
+        WHERE p.username LIKE ? ESCAPE '\\' OR p.full_name LIKE ? ESCAPE '\\'
+        ORDER BY us.total_views DESC
+        LIMIT 50
+        """,
+        (f"%{escaped}%", f"%{escaped}%"),
     ).fetchall()
     return [dict(r) for r in rows]
 

@@ -39,7 +39,7 @@ if st.button("🔍 Run API Diagnostic"):
             st.error(f"Diagnostic failed: {type(exc).__name__}: {exc}")
 
 # Sync controls
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     if st.button("🔄 Run Full Sync", type="primary"):
@@ -86,6 +86,24 @@ with col3:
                 f"{total_scores} scores, "
                 f"{game_results['badges_awarded']} badges"
             )
+
+with col4:
+    if st.button("🌐 Full Date Sweep"):
+        with st.spinner("Running full date sweep (this may take 15-30 min)..."):
+            from jellydash.sync.scraper import run_full_sync
+
+            result = run_async(run_full_sync(conn, use_date_sweep=True))
+            st.success(
+                f"Date sweep complete: {result['new_ids']} new IDs, "
+                f"{result['detailed']} fetched, {result['errors']} errors"
+            )
+            if result.get("discovery_errors"):
+                with st.expander(
+                    f"Discovery errors ({len(result['discovery_errors'])})",
+                    expanded=True,
+                ):
+                    for err in result["discovery_errors"]:
+                        st.code(err)
 
 # Sync history
 st.divider()
