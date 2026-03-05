@@ -12,7 +12,7 @@ from jellydash.analytics.rankings import refresh_user_stats
 from jellydash.analytics.topics import refresh_topics
 from jellydash.db import queries
 from jellydash.sync.background import get_last_error, is_sync_running
-from jellydash.ui.helpers import get_db, run_async
+from jellydash.ui.helpers import get_db, get_db_path_str, run_async
 
 st.set_page_config(page_title="Sync | JellyDash", page_icon="⚙️", layout="wide")
 st.title("⚙️ Sync & Admin")
@@ -101,7 +101,7 @@ else:
 st.divider()
 st.subheader("Database Stats")
 
-db_path = Path(__file__).resolve().parent.parent / "data" / "jellydash.db"
+db_path = Path(get_db_path_str())
 if db_path.exists():
     size_mb = db_path.stat().st_size / (1024 * 1024)
     st.write(f"**Database size:** {size_mb:.2f} MB")

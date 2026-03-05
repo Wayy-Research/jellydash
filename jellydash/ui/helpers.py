@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, TypeVar
@@ -14,7 +15,15 @@ from jellydash.db.schema import create_tables
 
 T = TypeVar("T")
 
-_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
+_SEED_DB = Path(__file__).resolve().parent.parent.parent / "data" / "jellydash.db"
+_LIVE_DB = Path("/tmp/jellydash.db")
+
+
+def _get_db_path() -> Path:
+    """Return a writable DB path, copying the seed DB if needed."""
+    if not _LIVE_DB.exists() and _SEED_DB.exists():
+        shutil.copy2(_SEED_DB, _LIVE_DB)
+    return _LIVE_DB if _LIVE_DB.exists() else _SEED_DB
 
 
 def run_async(coro: Any) -> Any:
@@ -36,9 +45,15 @@ def run_async(coro: Any) -> Any:
 @st.cache_resource
 def get_db() -> sqlite3.Connection:
     """Get a cached database connection, creating tables if needed."""
-    conn = get_connection(_DB_PATH)
+    db_path = _get_db_path()
+    conn = get_connection(db_path)
     create_tables(conn)
     return conn
+
+
+def get_db_path_str() -> str:
+    """Return the writable DB path as a string (for background sync)."""
+    return str(_get_db_path())
 
 
 def format_number(n: int | float) -> str:

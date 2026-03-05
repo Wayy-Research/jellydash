@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -16,14 +15,14 @@ from jellydash.sync.background import (
     start_background_sync,
 )
 from jellydash.ui.components import metric_cards
-from jellydash.ui.helpers import get_db
+from jellydash.ui.helpers import get_db, get_db_path_str
 
 logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(page_title="JellyDash", page_icon="🪼", layout="wide")
 st.title("🪼 JellyDash — Platform Analytics")
 
-DB_PATH = str(Path(__file__).resolve().parent / "data" / "jellydash.db")
+DB_PATH = get_db_path_str()
 
 conn = get_db()
 
