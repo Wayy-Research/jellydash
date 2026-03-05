@@ -1,4 +1,4 @@
-jellyjelly @ git+https://github.com/Wayy-Research/jelly.git@1ab96d6
+jellyjelly @ git+https://github.com/Wayy-Research/jelly.git@2c1520f
 streamlit>=1.40
 pandas>=2
 plotly>=5
