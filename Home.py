@@ -68,12 +68,40 @@ if daily:
 else:
     st.info("No data yet — initial sync is running...")
 
+# Popular Jellies
+st.divider()
+st.subheader("Popular Jellies")
+popular_rows = conn.execute(
+    """
+    SELECT id, title, all_views, likes_count, comments_count, thumbnail_url
+    FROM jellies
+    WHERE all_views > 0
+    ORDER BY all_views DESC
+    LIMIT 10
+    """
+).fetchall()
+if popular_rows:
+    for j in popular_rows:
+        j = dict(j)
+        c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
+        with c1:
+            st.write(f"**{j['title'][:80]}**")
+        with c2:
+            st.write(f"{j['all_views']:,} views")
+        with c3:
+            st.write(f"{j['likes_count']:,} likes")
+        with c4:
+            st.write(f"{j['comments_count']:,} comments")
+else:
+    st.info("No popular jellies yet — data loads after first sync.")
+
 # Quick links
 st.divider()
 st.subheader("Quick Links")
-cols = st.columns(5)
+cols = st.columns(6)
 cols[0].page_link("pages/1_Leaderboard.py", label="🏆 Leaderboard")
 cols[1].page_link("pages/2_Trending.py", label="📈 Trending")
 cols[2].page_link("pages/3_Games.py", label="🎮 Games")
 cols[3].page_link("pages/4_Explorer.py", label="🔍 Explorer")
 cols[4].page_link("pages/5_Sync.py", label="⚙️ Sync")
+cols[5].page_link("pages/6_Context.py", label="🧠 Context Layer")

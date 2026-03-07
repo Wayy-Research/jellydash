@@ -114,6 +114,16 @@ _TABLES: list[str] = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS transcript_segments (
+        jelly_id        TEXT NOT NULL REFERENCES jellies(id),
+        segment_idx     INTEGER NOT NULL,
+        text            TEXT NOT NULL DEFAULT '',
+        start_time      REAL NOT NULL DEFAULT 0.0,
+        end_time        REAL NOT NULL DEFAULT 0.0,
+        PRIMARY KEY (jelly_id, segment_idx)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS sync_runs (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         started_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -135,8 +145,45 @@ _INDEXES: list[str] = [
     " ON game_scores(game_id, score)",
     "CREATE INDEX IF NOT EXISTS idx_jelly_topics_topic ON jelly_topics(topic)",
     "CREATE INDEX IF NOT EXISTS idx_topics_period ON topics(period, period_start)",
+    "CREATE INDEX IF NOT EXISTS idx_segments_jelly ON transcript_segments(jelly_id)",
 ]
 
+_FTS_TABLES: list[str] = [
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS transcript_segments_fts
+    USING fts5(
+        text,
+        content='transcript_segments',
+        content_rowid='rowid'
+    )
+    """,
+]
+
+_FTS_TRIGGERS: list[str] = [
+    """
+    CREATE TRIGGER IF NOT EXISTS trig_segments_ai AFTER INSERT ON transcript_segments
+    BEGIN
+        INSERT INTO transcript_segments_fts(rowid, text)
+        VALUES (new.rowid, new.text);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trig_segments_ad AFTER DELETE ON transcript_segments
+    BEGIN
+        INSERT INTO transcript_segments_fts(transcript_segments_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trig_segments_au AFTER UPDATE ON transcript_segments
+    BEGIN
+        INSERT INTO transcript_segments_fts(transcript_segments_fts, rowid, text)
+        VALUES ('delete', old.rowid, old.text);
+        INSERT INTO transcript_segments_fts(rowid, text)
+        VALUES (new.rowid, new.text);
+    END
+    """,
+]
 
 _MIGRATIONS: list[str] = [
     "ALTER TABLE user_stats ADD COLUMN views_per_post REAL NOT NULL DEFAULT 0.0",
@@ -152,6 +199,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
         cur.execute(ddl)
     for idx in _INDEXES:
         cur.execute(idx)
+    for fts_ddl in _FTS_TABLES:
+        cur.execute(fts_ddl)
+    for trigger in _FTS_TRIGGERS:
+        cur.execute(trigger)
     # Run migrations for existing DBs (ignore if column already exists)
     for migration in _MIGRATIONS:
         try:

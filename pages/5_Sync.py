@@ -115,6 +115,50 @@ if runs:
 else:
     st.info("No sync runs yet.")
 
+# PostgreSQL sync
+st.divider()
+st.subheader("PostgreSQL Cloud Sync")
+
+from jellydash.db.pg_sync import get_pg_url
+
+pg_url = get_pg_url()
+if pg_url:
+    st.success(f"Connected to: `{pg_url.split('@')[1].split('/')[0] if '@' in pg_url else 'configured'}`")
+
+    pg_col1, pg_col2 = st.columns(2)
+    with pg_col1:
+        if st.button("☁️ Push to wayyDB"):
+            with st.spinner("Pushing data to PostgreSQL..."):
+                from jellydash.db.pg_sync import push_to_pg
+
+                try:
+                    counts = push_to_pg(conn)
+                    st.success(
+                        f"Pushed: {counts.get('jellies', 0)} jellies, "
+                        f"{counts.get('participants', 0)} users, "
+                        f"{counts.get('transcripts', 0)} transcripts, "
+                        f"{counts.get('transcript_segments', 0)} segments"
+                    )
+                except Exception as exc:
+                    st.error(f"Push failed: {type(exc).__name__}: {exc}")
+
+    with pg_col2:
+        if st.button("🗄️ Init PG Schema"):
+            with st.spinner("Creating jelly schema on wayyDB..."):
+                from jellydash.db.pg_sync import init_pg_schema
+
+                try:
+                    init_pg_schema()
+                    st.success("Schema initialized on wayyDB")
+                except Exception as exc:
+                    st.error(f"Schema init failed: {type(exc).__name__}: {exc}")
+else:
+    st.warning("Set `DATABASE_URL` env var to enable PostgreSQL sync")
+    st.code(
+        "export DATABASE_URL=postgresql://wayy:***@100.96.150.42:5432/wayydb",
+        language="bash",
+    )
+
 # DB stats
 st.divider()
 st.subheader("Database Stats")

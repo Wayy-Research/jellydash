@@ -1,115 +1,235 @@
-"""TF-IDF topic extraction from transcripts."""
+"""Groq-powered topic extraction from transcripts.
+
+Processes transcripts in batches via Groq LLM to extract meaningful,
+complex topics. Tracks which jellies have been processed to enable
+incremental extraction and stay within free-tier API limits.
+
+Groq free tier: ~30 req/min, ~14,400 req/day.
+Strategy: batch 10 transcripts per call, process incrementally.
+"""
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import numpy as np
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
+import httpx
 
-STOP_WORDS_EXTRA: list[str] = [
-    # Spoken-language fillers
-    "um", "uh", "uh huh", "hmm", "huh", "ah", "eh", "er", "mm",
-    "oh", "wow", "whoa", "ooh", "yep", "yup", "nah", "nope",
-    # Common interjections / discourse markers
-    "like", "know", "yeah", "right", "okay", "ok", "sure", "well",
-    "anyway", "anyways", "basically", "literally", "actually", "really",
-    "honestly", "seriously", "definitely", "obviously", "apparently",
-    "exactly", "absolutely", "probably", "maybe", "perhaps",
-    # Contractions and informal forms
-    "gonna", "gotta", "wanna", "kinda", "sorta", "coulda", "shoulda",
-    "woulda", "ain", "don", "didn", "doesn", "isn", "wasn", "weren",
-    "won", "wouldn", "couldn", "hasn", "haven", "hadn", "shouldn",
-    "ve", "ll", "re", "let",
-    # Common verbs that add noise
-    "just", "got", "get", "getting", "going", "go", "come", "came",
-    "said", "say", "saying", "tell", "told", "think", "thought",
-    "mean", "want", "need", "look", "looking", "see", "saw",
-    "make", "making", "made", "take", "taking", "took",
-    "put", "try", "trying", "tried", "give", "gave", "keep",
-    "feel", "felt", "start", "started", "happen", "happened",
-    # Generic nouns
-    "thing", "things", "stuff", "lot", "lots", "way", "time",
-    "people", "person", "guy", "guys", "man", "woman",
-    "day", "year", "point", "part", "kind",
-]
+logger = logging.getLogger(__name__)
 
-STOP_WORDS_ALL: list[str] = sorted(set(ENGLISH_STOP_WORDS) | set(STOP_WORDS_EXTRA))
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
+# How many transcripts to send per Groq call
+BATCH_SIZE = 10
+# Max batches per refresh call (to stay under rate limits)
+MAX_BATCHES_PER_RUN = 5
+# Truncate transcripts to this many chars to fit in context
+TRANSCRIPT_MAX_CHARS = 1500
 
-def extract_topics(
-    texts: list[str],
-    top_n: int = 30,
-    max_features: int = 5000,
-) -> list[tuple[str, float]]:
-    """Extract top topics from a list of transcript texts using TF-IDF.
+_EXTRACT_SYSTEM = """\
+You are a topic extraction engine for a video platform. Given a batch of \
+video transcripts, extract the specific, meaningful topics being discussed.
 
-    Args:
-        texts: List of transcript full texts.
-        top_n: Number of top terms to return.
-        max_features: Max vocabulary size.
+Rules:
+- Return 3-5 topics PER transcript (not generic labels)
+- Topics should be specific enough to be searchable (e.g. "bitcoin ETF approval" not "finance")
+- Prefer noun phrases: "AI code generation", "startup fundraising strategy", "SEC crypto regulation"
+- Each topic should be 2-5 words
+- Score each topic 0.0-1.0 by how central it is to that transcript
+- Return valid JSON only, no markdown
 
-    Returns:
-        List of (term, score) sorted by score descending.
-    """
-    if not texts or len(texts) < 2:
-        return []
+Output format:
+{
+  "results": [
+    {
+      "id": "<jelly_id>",
+      "topics": [
+        {"topic": "bitcoin ETF approval", "score": 0.9},
+        {"topic": "institutional crypto adoption", "score": 0.7}
+      ]
+    }
+  ],
+  "trending": [
+    {"topic": "bitcoin ETF approval", "score": 0.95},
+    {"topic": "AI code generation", "score": 0.8}
+  ]
+}
 
-    vectorizer = TfidfVectorizer(
-        ngram_range=(1, 2),
-        max_features=max_features,
-        stop_words=STOP_WORDS_ALL,
-        min_df=2,
-        max_df=0.85,
-    )
+The "trending" array should contain the 5-10 most significant cross-cutting \
+topics across ALL transcripts in this batch, scored by prominence."""
 
-    try:
-        tfidf_matrix = vectorizer.fit_transform(texts)
-    except ValueError:
-        return []
+_TRENDING_SYSTEM = """\
+You are a trend analysis engine. Given a list of topics extracted from recent \
+video transcripts on a social platform, identify the top trending themes.
 
-    feature_names = vectorizer.get_feature_names_out()
-    mean_scores: np.ndarray[Any, np.dtype[np.floating[Any]]] = np.asarray(
-        tfidf_matrix.mean(axis=0)
-    ).flatten()
+Rules:
+- Group similar topics into broader trends
+- Rank by frequency and recency
+- Return specific, meaningful trend names (not generic)
+- Score 0.0-1.0 by prominence
 
-    top_indices = mean_scores.argsort()[::-1][:top_n]
-    return [(str(feature_names[i]), float(mean_scores[i])) for i in top_indices]
+Return valid JSON only:
+{
+  "trends": [
+    {"topic": "AI regulation debate", "score": 0.95, "related": ["SEC AI rules", "EU AI act"]},
+    {"topic": "bitcoin price rally", "score": 0.8, "related": ["crypto ETF", "institutional buying"]}
+  ]
+}"""
 
 
-def extract_jelly_topics(
-    text: str,
-    vectorizer: TfidfVectorizer,
-    top_n: int = 5,
-) -> list[tuple[str, float]]:
-    """Extract top terms for a single jelly using a pre-fit vectorizer.
+def _get_api_key() -> str | None:
+    return os.environ.get("GROQ_API_KEY")
 
-    Args:
-        text: Single transcript text.
-        vectorizer: Pre-fit TfidfVectorizer.
-        top_n: Number of top terms.
 
-    Returns:
-        List of (term, relevance) pairs.
-    """
-    if not text.strip():
-        return []
+def _groq_call(system: str, user: str) -> dict[str, Any] | None:
+    """Make a single Groq API call. Returns parsed JSON or None."""
+    api_key = _get_api_key()
+    if not api_key:
+        return None
 
     try:
-        vec = vectorizer.transform([text])
+        resp = httpx.post(
+            GROQ_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2000,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"].strip()
+        return json.loads(content)  # type: ignore[no-any-return]
     except Exception:
-        return []
+        logger.exception("Groq topic extraction call failed")
+        return None
 
-    feature_names = vectorizer.get_feature_names_out()
-    scores: np.ndarray[Any, np.dtype[np.floating[Any]]] = np.asarray(
-        vec.toarray()
-    ).flatten()
-    top_indices = scores.argsort()[::-1][:top_n]
-    return [
-        (str(feature_names[i]), float(scores[i])) for i in top_indices if scores[i] > 0
-    ]
+
+def _get_unprocessed_jellies(
+    conn: sqlite3.Connection, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Get jellies with transcripts that haven't been topic-extracted yet."""
+    rows = conn.execute(
+        """
+        SELECT t.jelly_id, t.full_text, j.title, j.posted_at
+        FROM transcripts t
+        JOIN jellies j ON j.id = t.jelly_id
+        WHERE t.word_count > 20
+        AND t.jelly_id NOT IN (SELECT DISTINCT jelly_id FROM jelly_topics)
+        ORDER BY j.posted_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def extract_batch_topics(
+    conn: sqlite3.Connection,
+    batch: list[dict[str, Any]],
+) -> tuple[int, list[tuple[str, float]]]:
+    """Extract topics for a batch of jellies via Groq.
+
+    Returns (jelly_topics_stored, trending_topics).
+    """
+    # Build prompt
+    entries = []
+    for j in batch:
+        text = j["full_text"][:TRANSCRIPT_MAX_CHARS]
+        entries.append(f'[ID: {j["jelly_id"]}] Title: {j["title"]}\n{text}')
+
+    user_msg = "Extract topics from these transcripts:\n\n" + "\n\n---\n\n".join(entries)
+    result = _groq_call(_EXTRACT_SYSTEM, user_msg)
+
+    if not result:
+        return 0, []
+
+    stored = 0
+    trending: list[tuple[str, float]] = []
+
+    # Store per-jelly topics
+    for item in result.get("results", []):
+        jid = item.get("id", "")
+        for t in item.get("topics", []):
+            topic = t.get("topic", "").strip().lower()
+            score = float(t.get("score", 0.0))
+            if topic and score > 0:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO jelly_topics (jelly_id, topic, relevance)
+                    VALUES (?, ?, ?)
+                    """,
+                    (jid, topic, score),
+                )
+                stored += 1
+
+    # Collect trending from this batch
+    for t in result.get("trending", []):
+        topic = t.get("topic", "").strip().lower()
+        score = float(t.get("score", 0.0))
+        if topic and score > 0:
+            trending.append((topic, score))
+
+    conn.commit()
+    return stored, trending
+
+
+def extract_topics_incremental(
+    conn: sqlite3.Connection,
+    max_batches: int = MAX_BATCHES_PER_RUN,
+    batch_size: int = BATCH_SIZE,
+) -> dict[str, Any]:
+    """Process unextracted jellies in batches. Call on sync or on-demand.
+
+    Returns stats about what was processed.
+    """
+    if not _get_api_key():
+        return {"error": "GROQ_API_KEY not set", "processed": 0}
+
+    unprocessed = _get_unprocessed_jellies(conn, limit=max_batches * batch_size)
+    if not unprocessed:
+        return {"processed": 0, "remaining": 0, "message": "All jellies processed"}
+
+    total_stored = 0
+    all_trending: list[tuple[str, float]] = []
+    batches_run = 0
+
+    for i in range(0, len(unprocessed), batch_size):
+        if batches_run >= max_batches:
+            break
+        batch = unprocessed[i : i + batch_size]
+        stored, trending = extract_batch_topics(conn, batch)
+        total_stored += stored
+        all_trending.extend(trending)
+        batches_run += 1
+        logger.info(
+            "Topic batch %d: %d topics from %d jellies",
+            batches_run, stored, len(batch),
+        )
+
+    remaining = len(unprocessed) - (batches_run * batch_size)
+
+    return {
+        "processed": batches_run * batch_size,
+        "topics_stored": total_stored,
+        "trending_found": len(all_trending),
+        "remaining": max(0, remaining),
+        "batches": batches_run,
+    }
 
 
 def _period_start(period: str) -> str:
@@ -121,7 +241,7 @@ def _period_start(period: str) -> str:
         dt = now - timedelta(days=7)
     elif period == "30d":
         dt = now - timedelta(days=30)
-    else:  # all_time
+    else:
         return "2020-01-01T00:00:00Z"
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -131,38 +251,88 @@ def refresh_topics(
     period: str = "all_time",
     top_n: int = 30,
 ) -> int:
-    """Recompute topics for a time period.
+    """Recompute trending topics for a period.
 
-    Returns:
-        Number of topics stored.
+    If Groq is available: aggregates per-jelly topics from jelly_topics,
+    then uses Groq to synthesize top trends.
+
+    If Groq is unavailable: aggregates per-jelly topics by frequency.
     """
     ps = _period_start(period)
 
+    # First, run incremental extraction if Groq is available
+    if _get_api_key():
+        extract_topics_incremental(conn, max_batches=2)
+
+    # Aggregate jelly_topics for the period
     if period == "all_time":
         rows = conn.execute(
-            "SELECT jelly_id, full_text FROM transcripts WHERE full_text != ''"
+            """
+            SELECT jt.topic, AVG(jt.relevance) as avg_rel,
+                   COUNT(*) as freq
+            FROM jelly_topics jt
+            GROUP BY jt.topic
+            HAVING freq >= 2
+            ORDER BY freq * avg_rel DESC
+            LIMIT 100
+            """,
         ).fetchall()
     else:
         rows = conn.execute(
             """
-            SELECT t.jelly_id, t.full_text
-            FROM transcripts t
-            JOIN jellies j ON j.id = t.jelly_id
-            WHERE t.full_text != '' AND j.posted_at >= ?
+            SELECT jt.topic, AVG(jt.relevance) as avg_rel,
+                   COUNT(*) as freq
+            FROM jelly_topics jt
+            JOIN jellies j ON j.id = jt.jelly_id
+            WHERE j.posted_at >= ?
+            GROUP BY jt.topic
+            HAVING freq >= 1
+            ORDER BY freq * avg_rel DESC
+            LIMIT 100
             """,
             (ps,),
         ).fetchall()
 
-    texts = [r["full_text"] for r in rows]
-    jelly_ids = [r["jelly_id"] for r in rows]
+    raw_topics = [(r["topic"], r["avg_rel"], r["freq"]) for r in rows]
 
-    topics = extract_topics(texts, top_n=top_n)
+    if not raw_topics:
+        return 0
 
-    # Store global topics
+    # Try Groq synthesis for richer trending analysis
+    final_topics: list[tuple[str, float]] = []
+
+    if _get_api_key() and len(raw_topics) >= 5:
+        topic_list = "\n".join(
+            f"- {t} (appears {f}x, avg relevance {s:.2f})"
+            for t, s, f in raw_topics[:60]
+        )
+        user_msg = (
+            f"These are topics extracted from videos in the last "
+            f"{'24 hours' if period == '24h' else period}:\n\n"
+            f"{topic_list}\n\n"
+            f"Identify the top {top_n} trending themes."
+        )
+        result = _groq_call(_TRENDING_SYSTEM, user_msg)
+
+        if result and "trends" in result:
+            for t in result["trends"][:top_n]:
+                topic = t.get("topic", "").strip().lower()
+                score = float(t.get("score", 0.0))
+                if topic and score > 0:
+                    final_topics.append((topic, score))
+
+    # Fallback: use raw aggregated topics if Groq didn't produce results
+    if not final_topics:
+        for topic, avg_rel, freq in raw_topics[:top_n]:
+            # Score = freq-weighted relevance, normalized
+            score = min(1.0, (freq * avg_rel) / 5.0)
+            final_topics.append((topic, score))
+
+    # Store
     conn.execute(
         "DELETE FROM topics WHERE period = ? AND period_start = ?", (period, ps)
     )
-    for term, score in topics:
+    for term, score in final_topics:
         conn.execute(
             """
             INSERT INTO topics (topic, score, period, period_start)
@@ -171,31 +341,5 @@ def refresh_topics(
             (term, score, period, ps),
         )
 
-    # Per-jelly topic assignment
-    if texts and len(texts) >= 2:
-        vectorizer = TfidfVectorizer(
-            ngram_range=(1, 2),
-            max_features=5000,
-            stop_words=STOP_WORDS_ALL,
-            min_df=2,
-            max_df=0.85,
-        )
-        try:
-            vectorizer.fit(texts)
-        except ValueError:
-            conn.commit()
-            return len(topics)
-
-        for jid, text in zip(jelly_ids, texts):
-            jt = extract_jelly_topics(text, vectorizer, top_n=5)
-            for term, relevance in jt:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO jelly_topics (jelly_id, topic, relevance)
-                    VALUES (?, ?, ?)
-                    """,
-                    (jid, term, relevance),
-                )
-
     conn.commit()
-    return len(topics)
+    return len(final_topics)

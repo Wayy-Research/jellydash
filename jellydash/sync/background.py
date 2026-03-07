@@ -66,6 +66,25 @@ def _run_sync_loop(
             refresh_all_games(conn)
             logger.info("Analytics refreshed")
 
+            # Build context layer segments
+            from jellydash.context.segmenter import build_all_segments
+
+            n_segs = build_all_segments(conn)
+            if n_segs > 0:
+                logger.info("Built %d new transcript segments", n_segs)
+
+            # Push to PostgreSQL if configured
+            from jellydash.db.pg_sync import get_pg_url
+
+            if get_pg_url():
+                try:
+                    from jellydash.db.pg_sync import push_to_pg
+
+                    push_to_pg(conn)
+                    logger.info("Pushed data to PostgreSQL")
+                except Exception:
+                    logger.exception("PG push failed (non-fatal)")
+
             conn.close()
         except Exception:
             _last_error = traceback.format_exc()
@@ -100,6 +119,11 @@ def ensure_initial_sync(db_path: str) -> dict[str, Any] | None:
     for period in ["all_time", "30d", "7d", "24h"]:
         refresh_topics(conn, period)
     refresh_all_games(conn)
+
+    # Build context layer segments
+    from jellydash.context.segmenter import build_all_segments
+
+    build_all_segments(conn)
 
     conn.close()
     return result
