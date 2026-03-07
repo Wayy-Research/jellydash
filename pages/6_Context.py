@@ -15,7 +15,7 @@ from jellydash.context.groq_search import (
     text_search,
 )
 from jellydash.context.segmenter import build_all_segments
-from jellydash.ui.helpers import get_db
+from jellydash.ui.helpers import get_db, hls_player
 
 st.set_page_config(
     page_title="Context Layer | JellyDash", page_icon="🧠", layout="wide"
@@ -89,37 +89,15 @@ if query:
                         )
                 st.markdown(display_text)
 
-                # Video player — use hls.js for cross-browser HLS support
+                # Video player
                 hls_url = r.get("hls_master")
                 if hls_url:
                     st.markdown("---")
                     st.markdown(f"▶️ **Play from {timestamp}**")
-                    safe_url = html.escape(hls_url, quote=True)
-                    player_html = f"""
-                    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-                    <video id="player-{i}" controls width="100%" height="300"
-                           style="background:#000; border-radius:8px;"></video>
-                    <script>
-                    (function() {{
-                        var video = document.getElementById('player-{i}');
-                        var url = "{safe_url}";
-                        if (Hls.isSupported()) {{
-                            var hls = new Hls();
-                            hls.loadSource(url);
-                            hls.attachMedia(video);
-                            hls.on(Hls.Events.MANIFEST_PARSED, function() {{
-                                video.currentTime = {start_sec};
-                            }});
-                        }} else if (video.canPlayType('application/vnd.apple.mpegurl')) {{
-                            video.src = url;
-                            video.addEventListener('loadedmetadata', function() {{
-                                video.currentTime = {start_sec};
-                            }});
-                        }}
-                    }})();
-                    </script>
-                    """
-                    components.html(player_html, height=340)
+                    components.html(
+                        hls_player(hls_url, start_sec=start_sec, player_id=f"ctx-{i}"),
+                        height=340,
+                    )
                 else:
                     st.caption("No video stream available for this jelly.")
 
@@ -136,18 +114,27 @@ st.divider()
 st.subheader("Popular Jellies")
 st.caption("Most viewed jellies with transcripts available for search.")
 
-popular = get_popular_jellies(conn, limit=20)
+popular = get_popular_jellies(conn, limit=50)
 if popular:
-    for j in popular:
+    for i, j in enumerate(popular):
         has_tx = "✅" if j.get("has_transcript") else "—"
-        col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
-        with col1:
-            st.write(f"**{j['title'][:80]}**")
-        with col2:
-            st.write(f"{j['all_views']:,} views")
-        with col3:
-            st.write(f"{j['likes_count']:,} likes")
-        with col4:
-            st.write(f"Transcript: {has_tx}")
+        views = f"{j['all_views']:,}"
+        likes = f"{j['likes_count']:,}"
+        with st.expander(
+            f"#{i+1} {j['title'][:80]} — {views} views, {likes} likes (Transcript: {has_tx})",
+            expanded=False,
+        ):
+            mcols = st.columns([2, 1, 1])
+            mcols[0].metric("Views", views)
+            mcols[1].metric("Likes", likes)
+            if j.get("thumbnail_url"):
+                mcols[2].image(j["thumbnail_url"], width=120)
+            if j.get("hls_master"):
+                components.html(
+                    hls_player(j["hls_master"], player_id=f"pop-{i}"),
+                    height=340,
+                )
+            else:
+                st.caption("No video stream available.")
 else:
     st.info("No jellies found. Run a sync from the Sync page first.")

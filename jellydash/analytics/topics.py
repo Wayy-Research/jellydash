@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -234,7 +234,7 @@ def extract_topics_incremental(
 
 def _period_start(period: str) -> str:
     """Get ISO start date for a named period."""
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     if period == "24h":
         dt = now - timedelta(hours=24)
     elif period == "7d":

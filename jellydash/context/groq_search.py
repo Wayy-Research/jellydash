@@ -19,9 +19,12 @@ def _get_api_key() -> str | None:
 
 
 def _sanitize_fts_query(query: str) -> str:
-    """Escape user input for FTS5 literal matching."""
+    """Escape user input for FTS5 matching. Uses OR for multi-word queries."""
     tokens = query.strip().split()
-    return " ".join(f'"{t}"' for t in tokens if t)
+    quoted = [f'"{t}"' for t in tokens if t]
+    if not quoted:
+        return ""
+    return " OR ".join(quoted)
 
 
 def _fts_search(

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from jellyjelly.models import JellyDetail, TranscriptWord
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def upsert_jelly_detail(conn: sqlite3.Connection, detail: JellyDetail) -> None:

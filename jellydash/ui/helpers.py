@@ -63,3 +63,34 @@ def format_number(n: int | float) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}K"
     return str(int(n))
+
+
+def hls_player(hls_url: str, start_sec: int = 0, player_id: str = "p0") -> str:
+    """Return an HTML snippet for an HLS video player with hls.js."""
+    import html as _html
+
+    safe_url = _html.escape(hls_url, quote=True)
+    return f"""
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <video id="{player_id}" controls width="100%" height="300"
+           style="background:#000; border-radius:8px;"></video>
+    <script>
+    (function() {{
+        var video = document.getElementById('{player_id}');
+        var url = "{safe_url}";
+        if (Hls.isSupported()) {{
+            var hls = new Hls();
+            hls.loadSource(url);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, function() {{
+                video.currentTime = {start_sec};
+            }});
+        }} else if (video.canPlayType('application/vnd.apple.mpegurl')) {{
+            video.src = url;
+            video.addEventListener('loadedmetadata', function() {{
+                video.currentTime = {start_sec};
+            }});
+        }}
+    }})();
+    </script>
+    """

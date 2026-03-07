@@ -7,6 +7,7 @@ import logging
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 
 from jellydash.db import queries
 from jellydash.sync.background import (
@@ -15,7 +16,7 @@ from jellydash.sync.background import (
     start_background_sync,
 )
 from jellydash.ui.components import metric_cards
-from jellydash.ui.helpers import get_db, get_db_path_str
+from jellydash.ui.helpers import get_db, get_db_path_str, hls_player
 
 logging.basicConfig(level=logging.INFO)
 
@@ -73,25 +74,33 @@ st.divider()
 st.subheader("Popular Jellies")
 popular_rows = conn.execute(
     """
-    SELECT id, title, all_views, likes_count, comments_count, thumbnail_url
+    SELECT id, title, all_views, likes_count, comments_count,
+           thumbnail_url, hls_master, duration
     FROM jellies
     WHERE all_views > 0
     ORDER BY all_views DESC
-    LIMIT 10
+    LIMIT 50
     """
 ).fetchall()
 if popular_rows:
-    for j in popular_rows:
-        j = dict(j)
-        c1, c2, c3, c4 = st.columns([5, 1, 1, 1])
-        with c1:
-            st.write(f"**{j['title'][:80]}**")
-        with c2:
-            st.write(f"{j['all_views']:,} views")
-        with c3:
-            st.write(f"{j['likes_count']:,} likes")
-        with c4:
-            st.write(f"{j['comments_count']:,} comments")
+    for i, row in enumerate(popular_rows):
+        j = dict(row)
+        views = f"{j['all_views']:,}"
+        likes = f"{j['likes_count']:,}"
+        with st.expander(
+            f"#{i+1} {j['title'][:80]} — {views} views, {likes} likes",
+            expanded=False,
+        ):
+            mcols = st.columns([2, 1, 1, 1])
+            mcols[0].metric("Views", views)
+            mcols[1].metric("Likes", likes)
+            mcols[2].metric("Comments", f"{j['comments_count']:,}")
+            if j.get("thumbnail_url"):
+                mcols[3].image(j["thumbnail_url"], width=120)
+            if j.get("hls_master"):
+                components.html(hls_player(j["hls_master"], player_id=f"home-{i}"), height=340)
+            else:
+                st.caption("No video stream available.")
 else:
     st.info("No popular jellies yet — data loads after first sync.")
 

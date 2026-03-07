@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from jellyjelly.client import JellyClient
@@ -95,7 +95,7 @@ async def discover_by_date_sweep(
     found: set[str] = set()
     errors: list[str] = []
 
-    end_dt = datetime.now(UTC).date()
+    end_dt = datetime.now(timezone.utc).date()
     start_dt = datetime.strptime(start, "%Y-%m-%d").date()
     window = timedelta(days=window_days)
 

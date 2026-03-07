@@ -7,10 +7,11 @@ import os
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 
 from jellydash.analytics.topics import extract_topics_incremental, refresh_topics
 from jellydash.db import queries
-from jellydash.ui.helpers import get_db
+from jellydash.ui.helpers import get_db, hls_player
 
 st.set_page_config(page_title="Trending | JellyDash", page_icon="📈", layout="wide")
 st.title("📈 Trending Topics")
@@ -101,30 +102,39 @@ if topics:
         related = conn.execute(
             """
             SELECT j.id, j.title, j.all_views, j.likes_count, j.posted_at,
-                   jt.relevance
+                   j.hls_master, j.thumbnail_url, jt.relevance
             FROM jelly_topics jt
             JOIN jellies j ON j.id = jt.jelly_id
             WHERE jt.topic = ?
             ORDER BY jt.relevance DESC
-            LIMIT 20
+            LIMIT 30
             """,
             (selected_topic,),
         ).fetchall()
         if related:
-            rdf = pd.DataFrame([dict(r) for r in related])
-            st.dataframe(
-                rdf[["title", "all_views", "likes_count", "relevance", "posted_at"]].rename(
-                    columns={
-                        "title": "Title",
-                        "all_views": "Views",
-                        "likes_count": "Likes",
-                        "relevance": "Relevance",
-                        "posted_at": "Posted",
-                    }
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            for i, row in enumerate(related):
+                r = dict(row)
+                views = f"{r['all_views']:,}"
+                likes = f"{r['likes_count']:,}"
+                relevance = f"{r['relevance']:.0%}"
+                with st.expander(
+                    f"#{i+1} {r['title'][:80]} — {views} views, "
+                    f"relevance: {relevance}",
+                    expanded=False,
+                ):
+                    mcols = st.columns([2, 1, 1, 1])
+                    mcols[0].metric("Views", views)
+                    mcols[1].metric("Likes", likes)
+                    mcols[2].metric("Relevance", relevance)
+                    if r.get("thumbnail_url"):
+                        mcols[3].image(r["thumbnail_url"], width=120)
+                    if r.get("hls_master"):
+                        components.html(
+                            hls_player(r["hls_master"], player_id=f"trend-{i}"),
+                            height=340,
+                        )
+                    else:
+                        st.caption("No video stream available.")
         else:
             st.info("No jellies tagged with this topic yet.")
 else:
